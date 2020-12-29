@@ -4,7 +4,10 @@ use std::{
 };
 
 use iced::{
-    canvas::{event::Status, Canvas, Cursor, Event, Fill, Frame, Geometry, Path, Program, Stroke},
+    canvas::{
+        event::Status, path::Builder, Canvas, Cursor, Event, Fill, Frame, Geometry, Path, Program,
+        Stroke,
+    },
     executor, keyboard, time, Application, Color, Command, Element, Length, Point, Rectangle,
     Subscription, Vector,
 };
@@ -16,6 +19,22 @@ const MOON_COLOR: Color = Color {
     r: 0.7,
     g: 0.7,
     b: 0.7,
+    a: 1.0,
+};
+
+const INDICATOR_LEN: f32 = 20.0;
+const INDICATOR_ARROW_SIZE: f32 = 2.0;
+const INDICATOR_COLOR: Color = Color {
+    r: 0.8,
+    g: 0.0,
+    b: 0.0,
+    a: 1.0,
+};
+
+const EARTH_MOON_LINE_COLOR: Color = Color {
+    r: 0.5,
+    g: 1.0,
+    b: 1.0,
     a: 1.0,
 };
 
@@ -32,6 +51,7 @@ struct Libration {
     period: f64,
     eccentricity: f64,
     last_tick: Option<Instant>,
+    center_moon: bool,
 }
 
 impl Application for Libration {
@@ -48,6 +68,7 @@ impl Application for Libration {
                 period: 8.0,
                 eccentricity: 0.0,
                 last_tick: None,
+                center_moon: false,
             },
             Command::none(),
         )
@@ -99,6 +120,13 @@ impl Program<Message> for Libration {
 
         frame.translate(frame.center() - Point::new(0.0, 0.0));
         frame.scale(smaller_dim / self.scale as f32);
+
+        if self.center_moon {
+            let (x, y) = self.moon_pos();
+            frame.translate(Vector::new(-x, -y));
+        }
+
+        self.draw_earth_moon_line(&mut frame);
 
         let earth = Path::circle(Point::new(0.0, 0.0), EARTH_RADIUS);
         frame.fill(
@@ -162,6 +190,12 @@ impl Program<Message> for Libration {
             }) => {
                 self.scale *= 1.1;
             }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key_code: keyboard::KeyCode::C,
+                ..
+            }) => {
+                self.center_moon = !self.center_moon;
+            }
             _ => (),
         }
         (Status::Ignored, None)
@@ -177,7 +211,7 @@ impl Libration {
         ((-r * phi.cos()) as f32, (r * phi.sin()) as f32)
     }
 
-    fn moon_pos(&self) -> Vector<f32> {
+    fn moon_pos(&self) -> (f32, f32) {
         let mut mean_anomaly = self.time * 2.0 * PI;
         let ecc = self.eccentricity;
 
@@ -196,9 +230,7 @@ impl Libration {
         let true_anom = ((1.0 - ecc * ecc).sqrt() * ecc_anom.sin()).atan2(ecc_anom.cos() - ecc);
 
         let r = self.r(MOON_ORBIT_RADIUS, true_anom);
-        let (x, y) = Self::rphi_to_xy(r, true_anom);
-
-        Vector::new(x, y)
+        Self::rphi_to_xy(r, true_anom)
     }
 
     fn draw_moon_orbit(&self, frame: &mut Frame) {
@@ -218,7 +250,33 @@ impl Libration {
 
     fn draw_moon(&self, frame: &mut Frame) {
         frame.with_save(|frame| {
-            frame.translate(self.moon_pos());
+            let (x, y) = self.moon_pos();
+            frame.translate(Vector::new(x, y));
+            frame.rotate((-self.time * 2.0 * PI) as f32);
+
+            let indicator = Path::line(Point::new(0.0, 0.0), Point::new(INDICATOR_LEN, 0.0));
+            let mut indicator_arrow_head_builder = Builder::new();
+            indicator_arrow_head_builder.move_to(Point::new(INDICATOR_LEN, 0.0));
+            indicator_arrow_head_builder.line_to(Point::new(
+                INDICATOR_LEN - INDICATOR_ARROW_SIZE,
+                INDICATOR_ARROW_SIZE / 2.0,
+            ));
+            indicator_arrow_head_builder.line_to(Point::new(
+                INDICATOR_LEN - INDICATOR_ARROW_SIZE,
+                -INDICATOR_ARROW_SIZE / 2.0,
+            ));
+            indicator_arrow_head_builder.line_to(Point::new(INDICATOR_LEN, 0.0));
+            let indicator_arrow_head = indicator_arrow_head_builder.build();
+
+            frame.stroke(&indicator, Stroke::default().with_color(INDICATOR_COLOR));
+            frame.fill(
+                &indicator_arrow_head,
+                Fill {
+                    color: INDICATOR_COLOR,
+                    ..Default::default()
+                },
+            );
+
             let moon = Path::circle(Point::new(0.0, 0.0), MOON_RADIUS);
             frame.fill(
                 &moon,
@@ -228,6 +286,13 @@ impl Libration {
                 },
             );
         });
+    }
+
+    fn draw_earth_moon_line(&self, frame: &mut Frame) {
+        let (x, y) = self.moon_pos();
+        let path = Path::line(Point::new(0.0, 0.0), Point::new(x, y));
+
+        frame.stroke(&path, Stroke::default().with_color(EARTH_MOON_LINE_COLOR));
     }
 }
 
